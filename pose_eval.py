@@ -33,6 +33,7 @@ from pose_integration.draw import (
     draw_controls_hint,
     draw_feedback,
     draw_hud,
+    draw_no_pose_warning,
     draw_skeleton,
 )
 from pose_integration.normalize import joint_angle
@@ -120,6 +121,10 @@ def main():
         print(f"[error] Cannot open source: {args.source}", file=sys.stderr)
         sys.exit(1)
 
+    # Warm up the camera - skip first few blank frames
+    for _ in range(5):
+        cap.read()
+
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_idx = 0
     timer = SkillTimer()
@@ -132,6 +137,10 @@ def main():
             ok, bgr = cap.read()
             if not ok:
                 break
+
+            # Skip completely empty/black frames during startup
+            if bgr is None or bgr.size == 0:
+                continue
 
             timestamp_ms = frame_idx * (1000.0 / fps)
             pose_frame = svc.process_frame(bgr, frame_idx, timestamp_ms)
@@ -146,6 +155,10 @@ def main():
                 if not args.no_display:
                     draw_skeleton(bgr, pose_frame, joint_statuses)
                     draw_feedback(bgr, joint_statuses)
+            else:
+                timer.update(False)
+                if not args.no_display:
+                    draw_no_pose_warning(bgr)
 
             if not args.no_display:
                 draw_hud(bgr, skill_target.label, timer.elapsed, in_position)
@@ -158,9 +171,6 @@ def main():
                 elif key == ord(" "):
                     timer.reset()
                     print("[timer] Reset")
-            else:
-                # headless: still update timer
-                pass
 
             frame_idx += 1
 
@@ -179,7 +189,7 @@ def main():
     _export_csv(metrics, out_dir / "metrics.csv")
     _export_json(metrics, out_dir / "metrics.json")
 
-    # Append timer summary to JSON
+    # Write session summary JSON
     summary_path = out_dir / "session_summary.json"
     with open(summary_path, "w") as f:
         json.dump({
