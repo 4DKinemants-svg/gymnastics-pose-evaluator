@@ -2,12 +2,13 @@
 
 Provides three sequential OpenCV screens before live pose evaluation:
   1. Skill selection menu (press 1-6)
-  2. Skill breakdown + instructions
+  2. Skill breakdown + instructions (auto-advances after 6 seconds)
   3. Safety quiz (2-3 questions - must answer correctly to proceed)
 """
 from __future__ import annotations
 import cv2
 import numpy as np
+import time
 from typing import Optional, List
 from pose_targets import SKILL_REGISTRY, SkillTarget
 
@@ -19,6 +20,7 @@ CORRECT = (0, 220, 0)      # green
 WRONG = (0, 0, 220)        # red
 
 WINDOW_NAME = "4D Kinematics"
+BREAKDOWN_DISPLAY_SECONDS = 6  # How long to show breakdown before auto-advancing
 
 # ---------------------------------------------------------------------------
 # Skill knowledge base
@@ -272,12 +274,13 @@ def _show_skill_menu() -> Optional[str]:
                 return choice
 
 # ---------------------------------------------------------------------------
-# Stage 2: Skill Breakdown
+# Stage 2: Skill Breakdown (AUTO-ADVANCES after 6 seconds)
 # ---------------------------------------------------------------------------
 
 def _show_breakdown(skill_key: str) -> Optional[bool]:
-    """Show skill breakdown. Returns True to proceed, False to quit, None to go back."""
-    print(f"[intro] Showing breakdown for skill {skill_key}...")
+    """Show skill breakdown for 6 seconds, then auto-advance.
+    Returns True to proceed, False to quit, None to go back."""
+    print(f"[intro] Showing breakdown for skill {skill_key}... (auto-advancing in {BREAKDOWN_DISPLAY_SECONDS}s)")
     info = SKILL_INFO.get(skill_key, {})
     breakdown = info.get("breakdown", ["No info available"])
     skill_label = SKILL_REGISTRY[skill_key].label
@@ -288,27 +291,27 @@ def _show_breakdown(skill_key: str) -> Optional[bool]:
     
     footer = [
         "",
-        "Read carefully. Press [SPACE] to continue to safety quiz",
-        "Press [B] to go back to menu, [Q] to quit",
+        f"Read carefully - advancing to quiz in {BREAKDOWN_DISPLAY_SECONDS} seconds...",
+        "Press [Q] to quit",
     ]
     _put_text_lines(canvas, footer, 600, color=HIGHLIGHT, scale=0.55)
     
     cv2.imshow(WINDOW_NAME, canvas)
     cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
     
+    start_time = time.time()
     while True:
+        elapsed = time.time() - start_time
+        if elapsed >= BREAKDOWN_DISPLAY_SECONDS:
+            print("[intro] Auto-advancing to quiz")
+            return True
+        
         key = cv2.waitKey(50) & 0xFF
         if key == 255:
             continue
         if key == ord('q') or key == ord('Q'):
             print("[intro] User quit from breakdown")
             return False
-        if key == ord('b') or key == ord('B'):
-            print("[intro] User went back from breakdown")
-            return None
-        if key == ord(' '):
-            print("[intro] User proceeding to quiz")
-            return True
 
 # ---------------------------------------------------------------------------
 # Stage 3: Safety Quiz
@@ -402,13 +405,13 @@ def run_intro_flow() -> Optional[SkillTarget]:
             print("[intro] Flow terminated by user")
             return None
         
-        # Stage 2: Breakdown
+        # Stage 2: Breakdown (AUTO-ADVANCES)
         proceed = _show_breakdown(skill_key)
         if proceed is False:
             cv2.destroyAllWindows()
             print("[intro] Flow terminated by user")
             return None
-        if proceed is None:  # go back
+        if proceed is None:  # go back (shouldn't happen with auto-advance)
             continue
         
         # Stage 3: Quiz
