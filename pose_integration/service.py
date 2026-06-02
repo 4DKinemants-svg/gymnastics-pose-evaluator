@@ -6,25 +6,19 @@ normalization, computes joint angles, and returns scored results.
 """
 
 from __future__ import annotations
-import os
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
+from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
 
 from .contracts import LandmarkIndex, PoseFrame, SkillScore, SkillType
 from .adapters.mediapipe_tasks import result_to_pose_frame
 from .normalize import filter_landmarks, joint_angle, landmarks_visible
 
-# Key body-part groups used by scoring helpers
-_LOWER_BODY = [
-    LandmarkIndex.LEFT_HIP, LandmarkIndex.RIGHT_HIP,
-    LandmarkIndex.LEFT_KNEE, LandmarkIndex.RIGHT_KNEE,
-    LandmarkIndex.LEFT_ANKLE, LandmarkIndex.RIGHT_ANKLE,
-]
 _UPPER_BODY = [
     LandmarkIndex.LEFT_SHOULDER, LandmarkIndex.RIGHT_SHOULDER,
     LandmarkIndex.LEFT_ELBOW, LandmarkIndex.RIGHT_ELBOW,
@@ -50,6 +44,7 @@ class PoseService:
         base_options = mp_python.BaseOptions(model_asset_path=model_path)
         options = mp_vision.PoseLandmarkerOptions(
             base_options=base_options,
+            running_mode=VisionTaskRunningMode.VIDEO,
             output_segmentation_masks=False,
             num_poses=num_poses,
             min_pose_detection_confidence=visibility_threshold,
@@ -87,7 +82,6 @@ class PoseService:
         """Simple heuristic scorer - returns detected skill scores for one frame."""
         scores: List[SkillScore] = []
 
-        # Handstand detection: wrists above shoulders, hips above wrists
         if landmarks_visible(frame, _UPPER_BODY + [LandmarkIndex.LEFT_HIP, LandmarkIndex.RIGHT_HIP]):
             lw = frame.get(LandmarkIndex.LEFT_WRIST)
             ls = frame.get(LandmarkIndex.LEFT_SHOULDER)
