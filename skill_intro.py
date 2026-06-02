@@ -8,7 +8,7 @@ Provides three sequential OpenCV screens before live pose evaluation:
 from __future__ import annotations
 import cv2
 import numpy as np
-from typing import Optional, List, Tuple
+from typing import Optional, List
 from pose_targets import SKILL_REGISTRY, SkillTarget
 
 # Colors
@@ -17,6 +17,8 @@ TEXT_COLOR = (240, 240, 240)
 HIGHLIGHT = (0, 215, 255)  # yellow
 CORRECT = (0, 220, 0)      # green
 WRONG = (0, 0, 220)        # red
+
+WINDOW_NAME = "4D Kinematics"
 
 # ---------------------------------------------------------------------------
 # Skill knowledge base
@@ -232,6 +234,7 @@ def _center_text(canvas: np.ndarray, text: str, y: int, color=HIGHLIGHT, scale=0
 
 def _show_skill_menu() -> Optional[str]:
     """Display skill menu and return selected key (1-6) or None if quit."""
+    print("[intro] Showing skill selection menu...")
     canvas = _create_canvas()
     _center_text(canvas, "4D KINEMATICS - SELECT SKILL", 70)
     
@@ -251,21 +254,30 @@ def _show_skill_menu() -> Optional[str]:
     ]
     _put_text_lines(canvas, menu_lines, 130, scale=0.7, weight=2)
     
-    cv2.imshow("4D Kinematics", canvas)
+    cv2.imshow(WINDOW_NAME, canvas)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
     
     while True:
-        key = cv2.waitKey(100) & 0xFF
-        if key == ord('q'):
+        key = cv2.waitKey(50) & 0xFF
+        if key == 255:  # No key pressed
+            continue
+        if key == ord('q') or key == ord('Q'):
+            print("[intro] User quit from menu")
             return None
-        if chr(key) in SKILL_REGISTRY:
-            return chr(key)
+        # Check if valid digit key 1-6
+        if key >= ord('1') and key <= ord('6'):
+            choice = chr(key)
+            if choice in SKILL_REGISTRY:
+                print(f"[intro] User selected: {choice}")
+                return choice
 
 # ---------------------------------------------------------------------------
 # Stage 2: Skill Breakdown
 # ---------------------------------------------------------------------------
 
-def _show_breakdown(skill_key: str) -> bool:
-    """Show skill breakdown. Returns True to proceed, False to quit."""
+def _show_breakdown(skill_key: str) -> Optional[bool]:
+    """Show skill breakdown. Returns True to proceed, False to quit, None to go back."""
+    print(f"[intro] Showing breakdown for skill {skill_key}...")
     info = SKILL_INFO.get(skill_key, {})
     breakdown = info.get("breakdown", ["No info available"])
     skill_label = SKILL_REGISTRY[skill_key].label
@@ -281,23 +293,30 @@ def _show_breakdown(skill_key: str) -> bool:
     ]
     _put_text_lines(canvas, footer, 600, color=HIGHLIGHT, scale=0.55)
     
-    cv2.imshow("4D Kinematics", canvas)
+    cv2.imshow(WINDOW_NAME, canvas)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
     
     while True:
-        key = cv2.waitKey(100) & 0xFF
-        if key == ord('q'):
+        key = cv2.waitKey(50) & 0xFF
+        if key == 255:
+            continue
+        if key == ord('q') or key == ord('Q'):
+            print("[intro] User quit from breakdown")
             return False
-        if key == ord('b'):
-            return None  # signal to go back
+        if key == ord('b') or key == ord('B'):
+            print("[intro] User went back from breakdown")
+            return None
         if key == ord(' '):
+            print("[intro] User proceeding to quiz")
             return True
 
 # ---------------------------------------------------------------------------
 # Stage 3: Safety Quiz
 # ---------------------------------------------------------------------------
 
-def _show_quiz(skill_key: str) -> bool:
-    """Run safety quiz. Returns True if passed, False if quit."""
+def _show_quiz(skill_key: str) -> Optional[bool]:
+    """Run safety quiz. Returns True if passed, False if quit, None if failed."""
+    print(f"[intro] Starting safety quiz for skill {skill_key}...")
     info = SKILL_INFO.get(skill_key, {})
     quiz_qs = info.get("quiz", [])
     skill_label = SKILL_REGISTRY[skill_key].label
@@ -315,6 +334,7 @@ def _show_quiz(skill_key: str) -> bool:
 
 def _ask_question(skill_label: str, q_num: int, total: int, q_data: dict) -> Optional[bool]:
     """Show one question. Returns True if correct, False if wrong, None if quit."""
+    print(f"[intro] Quiz question {q_num}/{total}")
     canvas = _create_canvas()
     _center_text(canvas, f"{skill_label} - Safety Quiz ({q_num}/{total})", 50)
     
@@ -329,32 +349,42 @@ def _ask_question(skill_label: str, q_num: int, total: int, q_data: dict) -> Opt
     ]
     _put_text_lines(canvas, lines, 130, scale=0.7, weight=2)
     
-    cv2.imshow("4D Kinematics", canvas)
+    cv2.imshow(WINDOW_NAME, canvas)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
     
     while True:
-        key = cv2.waitKey(100) & 0xFF
-        if key == ord('q'):
+        key = cv2.waitKey(50) & 0xFF
+        if key == 255:
+            continue
+        if key == ord('q') or key == ord('Q'):
+            print("[intro] User quit from quiz")
             return None
-        choice = chr(key).upper()
+        choice = chr(key).upper() if key < 128 else None
         if choice in ['A', 'B', 'C']:
-            return choice == q_data["correct"]
+            is_correct = choice == q_data["correct"]
+            print(f"[intro] User answered {choice} - {'CORRECT' if is_correct else 'WRONG'}")
+            return is_correct
 
 def _show_fail_screen(skill_label: str):
     """Show 'incorrect answer' screen."""
+    print("[intro] Quiz failed - showing fail screen")
     canvas = _create_canvas()
     _center_text(canvas, "INCORRECT ANSWER", 250, color=WRONG, scale=1.2)
     _center_text(canvas, f"Please review {skill_label} safety info and try again.", 320, color=TEXT_COLOR, scale=0.7, weight=1)
     _center_text(canvas, "Press any key to return to menu", 400, color=HIGHLIGHT, scale=0.6, weight=1)
-    cv2.imshow("4D Kinematics", canvas)
+    cv2.imshow(WINDOW_NAME, canvas)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
     cv2.waitKey(0)
 
 def _show_pass_screen(skill_label: str):
     """Show 'quiz passed' screen."""
+    print("[intro] Quiz passed - showing success screen")
     canvas = _create_canvas()
     _center_text(canvas, "SAFETY QUIZ PASSED!", 250, color=CORRECT, scale=1.2)
     _center_text(canvas, f"You may now proceed with {skill_label} evaluation.", 320, color=TEXT_COLOR, scale=0.7, weight=1)
     _center_text(canvas, "Press any key to start camera...", 400, color=HIGHLIGHT, scale=0.6, weight=1)
-    cv2.imshow("4D Kinematics", canvas)
+    cv2.imshow(WINDOW_NAME, canvas)
+    cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
     cv2.waitKey(0)
 
 # ---------------------------------------------------------------------------
@@ -363,17 +393,20 @@ def _show_pass_screen(skill_label: str):
 
 def run_intro_flow() -> Optional[SkillTarget]:
     """Run full intro: menu -> breakdown -> quiz. Returns SkillTarget or None if quit."""
+    print("[intro] ========== Starting on-screen intro flow ==========")
     while True:
         # Stage 1: Skill selection
         skill_key = _show_skill_menu()
         if skill_key is None:
             cv2.destroyAllWindows()
+            print("[intro] Flow terminated by user")
             return None
         
         # Stage 2: Breakdown
         proceed = _show_breakdown(skill_key)
         if proceed is False:
             cv2.destroyAllWindows()
+            print("[intro] Flow terminated by user")
             return None
         if proceed is None:  # go back
             continue
@@ -382,10 +415,13 @@ def run_intro_flow() -> Optional[SkillTarget]:
         passed = _show_quiz(skill_key)
         if passed is False:
             cv2.destroyAllWindows()
+            print("[intro] Flow terminated by user")
             return None
         if passed is None:  # failed quiz - restart
             continue
         
         # Success!
         cv2.destroyAllWindows()
-        return SKILL_REGISTRY[skill_key]
+        selected = SKILL_REGISTRY[skill_key]
+        print(f"[intro] ========== Intro complete: {selected.label} ==========")
+        return selected
