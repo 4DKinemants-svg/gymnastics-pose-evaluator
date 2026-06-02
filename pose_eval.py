@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 os.environ["GLOG_minloglevel"] = "3"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -13,12 +14,10 @@ Outputs:
     - CSV and JSON metric exports
 """
 
-from __future__ import annotations
 import argparse
 import csv
 import json
 import sys
-import time
 from pathlib import Path
 from typing import List
 
