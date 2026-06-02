@@ -101,18 +101,25 @@ def test_normalization():
     knee = filtered.landmarks[LandmarkIndex.LEFT_KNEE]
     check("Low-visibility landmark filtered", knee.visibility == 0.0)
 
-    # Create a simple right-angle triangle for angle check
-    world = [
-        Landmark(x=0.0, y=1.0, z=0.0, visibility=0.9),  # point A
-        Landmark(x=0.0, y=0.0, z=0.0, visibility=0.9),  # point B (joint)
-        Landmark(x=1.0, y=0.0, z=0.0, visibility=0.9),  # point C
-    ] + [Landmark(x=0, y=0, z=0, visibility=0.9)] * 30
+    # Build 33 landmarks for a right-angle test using valid indices
+    # LEFT_HIP(23) at (0,1,0), LEFT_KNEE(25) at (0,0,0), LEFT_ANKLE(27) at (1,0,0)
+    world = [Landmark(x=0.5, y=0.5, z=0.0, visibility=0.9)] * 33
+    world[LandmarkIndex.LEFT_HIP]   = Landmark(x=0.0, y=1.0, z=0.0, visibility=0.9)
+    world[LandmarkIndex.LEFT_KNEE]  = Landmark(x=0.0, y=0.0, z=0.0, visibility=0.9)
+    world[LandmarkIndex.LEFT_ANKLE] = Landmark(x=1.0, y=0.0, z=0.0, visibility=0.9)
+
     frame2 = PoseFrame(frame_index=1, timestamp_ms=33.0, landmarks=world, world_landmarks=world)
-    angle = joint_angle(frame2, LandmarkIndex(0), LandmarkIndex(1), LandmarkIndex(2))
+    angle = joint_angle(
+        frame2,
+        LandmarkIndex.LEFT_HIP,
+        LandmarkIndex.LEFT_KNEE,
+        LandmarkIndex.LEFT_ANKLE,
+    )
     check("joint_angle right-angle", angle is not None and abs(angle - 90.0) < 0.01,
           f"got {angle}")
 
-    check("landmarks_visible True", landmarks_visible(frame2, [LandmarkIndex(0), LandmarkIndex(1)]))
+    check("landmarks_visible True",
+          landmarks_visible(frame2, [LandmarkIndex.LEFT_HIP, LandmarkIndex.LEFT_KNEE]))
     check("landmarks_visible False (filtered knee)",
           not landmarks_visible(filtered, [LandmarkIndex.LEFT_KNEE]))
 
