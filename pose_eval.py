@@ -1,3 +1,7 @@
+import os
+os.environ["GLOG_minloglevel"] = "3"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 """pose_eval.py - 4D Kinematics Gymnastics Pose Evaluator CLI entry point.
 
 Usage:
@@ -106,7 +110,6 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Open video source
     src = int(args.source) if args.source.isdigit() else args.source
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
@@ -143,7 +146,6 @@ def main():
     if not args.no_display:
         cv2.destroyAllWindows()
 
-    # Export metrics
     metrics = _extract_metrics(svc)
     _export_csv(metrics, out_dir / "metrics.csv")
     _export_json(metrics, out_dir / "metrics.json")
