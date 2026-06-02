@@ -6,11 +6,16 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 """pose_eval.py - 4D Kinematics Gymnastics Pose Evaluator CLI entry point.
 
 Usage:
+    python pose_eval.py --model pose_landmarker.task --source 0
     python pose_eval.py --model pose_landmarker.task --source video.mp4
-    python pose_eval.py --model pose_landmarker.task --source 0  # webcam
+    python pose_eval.py --model pose_landmarker.task --source 0 --skill 1
+
+Skill IDs (pass via --skill or select interactively):
+    1 = Handstand  2 = Front Walkover  3 = Back Walkover
+    4 = Back Handspring  5 = Cartwheel  6 = Roundoff
 
 Outputs:
-    - Annotated video (optional, --no-display to skip window)
+    - Live annotated window with skeleton, HUD, and timer
     - CSV and JSON metric exports
 """
 
@@ -24,33 +29,22 @@ from typing import List
 import cv2
 
 from pose_integration.contracts import LandmarkIndex, SkillScore
+from pose_integration.draw import (
+    draw_controls_hint,
+    draw_feedback,
+    draw_hud,
+    draw_skeleton,
+)
 from pose_integration.normalize import joint_angle
 from pose_integration.service import PoseService
-
-
-# ---------------------------------------------------------------------------
-# Drawing helpers
-# ---------------------------------------------------------------------------
-def _draw_landmarks(frame, pose_frame):
-    """Overlay green dots for each visible landmark."""
-    h, w = frame.shape[:2]
-    for lm in pose_frame.landmarks:
-        if lm.visibility > 0:
-            cx, cy = int(lm.x * w), int(lm.y * h)
-            cv2.circle(frame, (cx, cy), 4, (0, 255, 0), -1)
-
-
-def _draw_scores(frame, scores: List[SkillScore]):
-    """Print skill scores in the top-left corner."""
-    for i, s in enumerate(scores):
-        label = f"{s.skill.name}: {s.score:.1f}"
-        cv2.putText(frame, label, (10, 30 + i * 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+from pose_integration.timer import SkillTimer
+from pose_targets import SKILL_REGISTRY, SkillTarget, prompt_skill_selection
 
 
 # ---------------------------------------------------------------------------
 # Metric extraction
 # ---------------------------------------------------------------------------
+
 def _extract_metrics(svc: PoseService) -> List[dict]:
     rows = []
     for pf in svc.all_frames():
@@ -78,6 +72,7 @@ def _extract_metrics(svc: PoseService) -> List[dict]:
 # ---------------------------------------------------------------------------
 # Export helpers
 # ---------------------------------------------------------------------------
+
 def _export_csv(rows: List[dict], path: Path):
     if not rows:
         return
@@ -97,6 +92,7 @@ def _export_json(rows: List[dict], path: Path):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser(description="4D Kinematics Pose Evaluator")
     parser.add_argument("--model", required=True, help="Path to pose_landmarker.task model file")
@@ -104,7 +100,16 @@ def main():
     parser.add_argument("--out-dir", default="output", help="Directory for exported metrics")
     parser.add_argument("--no-display", action="store_true", help="Disable video window (headless mode)")
     parser.add_argument("--visibility", type=float, default=0.5, help="Visibility confidence threshold")
+    parser.add_argument("--skill", default=None,
+                        help="Skill ID to evaluate (1-6). Skips interactive prompt.")
     args = parser.parse_args()
+
+    # --- Skill selection ---
+    if args.skill and args.skill in SKILL_REGISTRY:
+        skill_target: SkillTarget = SKILL_REGISTRY[args.skill]
+        print(f"[skill] Using: {skill_target.label}")
+    else:
+        skill_target = prompt_skill_selection()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -117,8 +122,10 @@ def main():
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_idx = 0
+    timer = SkillTimer()
 
-    print(f"[info] Starting pose evaluation | model={args.model} source={args.source}")
+    print(f"[info] Starting | skill={skill_target.label} | model={args.model} | source={args.source}")
+    print("[info] Keys: Q = quit   SPACE = reset hold timer")
 
     with PoseService(model_path=args.model, visibility_threshold=args.visibility) as svc:
         while True:
@@ -129,15 +136,31 @@ def main():
             timestamp_ms = frame_idx * (1000.0 / fps)
             pose_frame = svc.process_frame(bgr, frame_idx, timestamp_ms)
 
-            if pose_frame and not args.no_display:
-                _draw_landmarks(bgr, pose_frame)
-                scores = svc.score_frame(pose_frame)
-                _draw_scores(bgr, scores)
+            joint_statuses = {}
+            in_position = False
+
+            if pose_frame:
+                in_position, joint_statuses = skill_target.check_frame(pose_frame)
+                timer.update(in_position)
+
+                if not args.no_display:
+                    draw_skeleton(bgr, pose_frame, joint_statuses)
+                    draw_feedback(bgr, joint_statuses)
 
             if not args.no_display:
+                draw_hud(bgr, skill_target.label, timer.elapsed, in_position)
+                draw_controls_hint(bgr)
                 cv2.imshow("4D Kinematics", bgr)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
                     break
+                elif key == ord(" "):
+                    timer.reset()
+                    print("[timer] Reset")
+            else:
+                # headless: still update timer
+                pass
 
             frame_idx += 1
 
@@ -145,10 +168,26 @@ def main():
     if not args.no_display:
         cv2.destroyAllWindows()
 
+    # Print session summary
+    summary = timer.summary()
+    print(f"[done] Processed {frame_idx} frames.")
+    print(f"[timer] Total hold: {summary['total_hold_secs']}s | "
+          f"Best hold: {summary['best_hold_secs']}s | "
+          f"Hold count: {summary['hold_count']}")
+
     metrics = _extract_metrics(svc)
     _export_csv(metrics, out_dir / "metrics.csv")
     _export_json(metrics, out_dir / "metrics.json")
-    print(f"[done] Processed {frame_idx} frames.")
+
+    # Append timer summary to JSON
+    summary_path = out_dir / "session_summary.json"
+    with open(summary_path, "w") as f:
+        json.dump({
+            "skill": skill_target.label,
+            "frames_processed": frame_idx,
+            **summary,
+        }, f, indent=2)
+    print(f"[export] Session summary -> {summary_path}")
 
 
 if __name__ == "__main__":
