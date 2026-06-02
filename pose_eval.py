@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 os.environ["GLOG_minloglevel"] = "3"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-
 """pose_eval.py - 4D Kinematics Gymnastics Pose Evaluator CLI entry point.
 
 Usage:
@@ -10,7 +9,7 @@ Usage:
     python pose_eval.py --model pose_landmarker.task --source video.mp4
     python pose_eval.py --model pose_landmarker.task --source 0 --skill 1
 
-Skill IDs (pass via --skill or select interactively):
+Skill IDs (pass via --skill or select interactively on-screen):
     1 = Handstand  2 = Front Walkover  3 = Back Walkover
     4 = Back Handspring  5 = Cartwheel  6 = Roundoff
 
@@ -18,7 +17,6 @@ Outputs:
     - Live annotated window with skeleton, HUD, and timer
     - CSV and JSON metric exports
 """
-
 import argparse
 import csv
 import json
@@ -39,8 +37,8 @@ from pose_integration.draw import (
 from pose_integration.normalize import joint_angle
 from pose_integration.service import PoseService
 from pose_integration.timer import SkillTimer
-from pose_targets import SKILL_REGISTRY, SkillTarget, prompt_skill_selection
-
+from pose_targets import SKILL_REGISTRY, SkillTarget
+from skill_intro import run_intro_flow
 
 # ---------------------------------------------------------------------------
 # Metric extraction
@@ -69,7 +67,6 @@ def _extract_metrics(svc: PoseService) -> List[dict]:
         })
     return rows
 
-
 # ---------------------------------------------------------------------------
 # Export helpers
 # ---------------------------------------------------------------------------
@@ -83,12 +80,10 @@ def _export_csv(rows: List[dict], path: Path):
         writer.writerows(rows)
     print(f"[export] CSV -> {path}")
 
-
 def _export_json(rows: List[dict], path: Path):
     with open(path, "w") as f:
         json.dump(rows, f, indent=2)
     print(f"[export] JSON -> {path}")
-
 
 # ---------------------------------------------------------------------------
 # Main
@@ -102,15 +97,21 @@ def main():
     parser.add_argument("--no-display", action="store_true", help="Disable video window (headless mode)")
     parser.add_argument("--visibility", type=float, default=0.5, help="Visibility confidence threshold")
     parser.add_argument("--skill", default=None,
-                        help="Skill ID to evaluate (1-6). Skips interactive prompt.")
+                        help="Skill ID to evaluate (1-6). Skips on-screen intro if provided.")
     args = parser.parse_args()
 
     # --- Skill selection ---
     if args.skill and args.skill in SKILL_REGISTRY:
+        # CLI bypass: use the provided skill ID directly
         skill_target: SkillTarget = SKILL_REGISTRY[args.skill]
         print(f"[skill] Using: {skill_target.label}")
     else:
-        skill_target = prompt_skill_selection()
+        # Interactive on-screen flow: menu → breakdown → quiz
+        skill_target = run_intro_flow()
+        if skill_target is None:
+            print("[info] User quit during skill selection")
+            sys.exit(0)
+        print(f"[skill] Selected: {skill_target.label}")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -130,7 +131,7 @@ def main():
     timer = SkillTimer()
 
     print(f"[info] Starting | skill={skill_target.label} | model={args.model} | source={args.source}")
-    print("[info] Keys: Q = quit   SPACE = reset hold timer")
+    print("[info] Keys: Q = quit  SPACE = reset hold timer")
 
     with PoseService(model_path=args.model, visibility_threshold=args.visibility) as svc:
         while True:
@@ -151,7 +152,6 @@ def main():
             if pose_frame:
                 in_position, joint_statuses = skill_target.check_frame(pose_frame)
                 timer.update(in_position)
-
                 if not args.no_display:
                     draw_skeleton(bgr, pose_frame, joint_statuses)
                     draw_feedback(bgr, joint_statuses)
@@ -198,7 +198,6 @@ def main():
             **summary,
         }, f, indent=2)
     print(f"[export] Session summary -> {summary_path}")
-
 
 if __name__ == "__main__":
     main()
